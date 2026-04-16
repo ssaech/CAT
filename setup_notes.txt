@@ -81,3 +81,17 @@ Here’s a short final status note you can use:
 - Recommended next step: stop iterating on this checkpoint and try a different pretrained model, ideally a smaller or more multilingual speech model, rather than continuing to train this one.
 
 - facebook/mms-300m is now the preferred checkpoint because it is the first model that avoided both of the earlier failure modes: unlike facebook/wav2vec2-base-960h, it did not collapse to blank predictions, and unlike facebook/wav2vec2-xls-r-300m, it achieved better loss and error metrics on the same 1-epoch 100/20 CPU experiment. In your runs, mms-300m produced lower train_loss, lower dev_loss, lower dev_cer, slightly better dev_wer, and non-empty sample hypotheses, which makes it the strongest candidate so far for continued Iu Mien fine-tuning on this machine.
+
+rule of thumb:
+    dev_empty_pred_frac = 0.0 means the model is at least speaking instead of blanking
+    dev_cer < 0.8 means it may be worth spot-testing on your own voice
+    dev_cer < 0.5 means it is starting to become meaningfully testable
+    dev_cer < 0.3 is where I’d start expecting occasional useful transcriptions on in-domain speech
+
+Checkpoint before real testing
+- The two MMS results came from the same pretrained backbone, facebook/mms-300m, but from different fresh fine-tuning runs rather than a continued checkpoint. In both cases the Iu Mien CTC output head was initialized from scratch, and early CTC training on a small dataset is fragile enough that one fresh run can start producing non-empty text while another drifts back toward blank predictions. The runs also used different train/dev subset sizes (100/20 versus 200/50), so the metrics are not directly comparable. The practical takeaway is that the better mms300m_debug result reflects a more favorable fine-tuning trajectory, which made resuming from that saved checkpoint the right next experiment to try instead of repeatedly restarting from the base pretrained model.
+- Very small continuation runs are not rescuing the model. Repeated 1e-7 resume training on the same 100-example setup is gradually degrading the only checkpoint that showed real promise.
+- The observed results indicate progressive deterioration rather than improvement: blank predictions become more common, decoded outputs become shorter and more collapsed, dev_cer worsens, and overall transcription quality declines even when loss decreases slightly.
+- In plain terms, continuing this exact training recipe is hurting more than it is helping. At this stage, the current continuation path behaves more like decay than refinement.
+- The checkpoint to preserve is exp_cpu/iumien_mms300m_debug/best_model, which remains the strongest non-blank model produced so far. Later continuation runs have not surpassed it and instead pushed the model back toward weaker behavior.
+- The current plan is to stop this continuation chain, keep mms300m_debug/best_model as the best available checkpoint, and shift to inference on real recordings to judge practical usefulness. If training resumes later, the recipe should change more substantially rather than continue with more tiny learning-rate updates.
