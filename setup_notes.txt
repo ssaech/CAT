@@ -54,3 +54,30 @@ python utils/pipeline/asr.py exp/Mono-subword --start_stage 1 --stop_stage 4
 - The current recommended next step is an unfrozen low-learning-rate run so the encoder has a better chance to escape blank-only decoding:
   `python local/train_wav2vec2_ctc_cpu.py --data-root /Users/web/MightLJSpeech/MightLJSpeech-1.1 --model facebook/wav2vec2-base-960h --save-dir exp_cpu/iumien_wav2vec2_unfrozen_200x5 --epochs 5 --max-train 200 --max-dev 50 --batch-size 1 --grad-accum 1 --lr 5e-6 --show-samples 5`
   and do not add `--freeze-feature-encoder`.
+
+
+
+--- blank hyp
+Here’s a short final status note you can use:
+
+- The Iu Mien local recipe and preprocessing flow are now functional, but full CAT ASR training still cannot run on this machine because CAT requires CUDA and does not support CPU-only training in [coreutils.py](/Users/web/CAT/cat/shared/coreutils.py:497).
+
+- We worked around the original dataset/setup issues by generating `train_data.txt`, `dev_data.txt`, and `test_data.txt` from `metadata.csv`, fixing local filtering and feature-prep scripts, and patching CAT’s audio/data prep so local preprocessing could run successfully on macOS.
+
+- Kaldi was not required for the CPU path we tested. We instead built a separate CPU-friendly supervised baseline in [train_wav2vec2_ctc_cpu.py](/Users/web/CAT/egs/IuMien/local/train_wav2vec2_ctc_cpu.py) using Hugging Face `Wav2Vec2 CTC`.
+
+- Whisper on CPU was tested as a possible zero-shot fallback, but it was not usable for this dataset because it hallucinated Chinese output for an Iu Mien clip.
+
+- The first `facebook/wav2vec2-base-960h` fine-tuning attempts failed with `NaN` losses. We stabilized training by lowering the learning rate, setting `grad-accum=1`, disabling spec augment by default, and adding fast failure on non-finite loss.
+
+- After those fixes, CPU training became numerically stable and losses decreased across runs and epochs, which confirmed that the local training loop itself was working.
+
+- However, evaluation showed that the model collapsed to blank CTC predictions: `dev_empty_pred_frac: 1.0`, `dev_cer: 1.0`, and `dev_wer: 1.0`, with all decoded hypotheses empty.
+
+- We also patched the script to support `--load-from` and `--eval-only` so saved checkpoints could be inspected directly; this confirmed that the saved `exp_cpu/iumien_wav2vec2_unfrozen_200x5/best_model` checkpoint is also blank-collapsed.
+
+- Final result: the current CPU-friendly `facebook/wav2vec2-base-960h` setup is technically stable on this dataset, but it does not produce usable Iu Mien transcriptions because it converges to blank predictions.
+
+- Recommended next step: stop iterating on this checkpoint and try a different pretrained model, ideally a smaller or more multilingual speech model, rather than continuing to train this one.
+
+- facebook/mms-300m is now the preferred checkpoint because it is the first model that avoided both of the earlier failure modes: unlike facebook/wav2vec2-base-960h, it did not collapse to blank predictions, and unlike facebook/wav2vec2-xls-r-300m, it achieved better loss and error metrics on the same 1-epoch 100/20 CPU experiment. In your runs, mms-300m produced lower train_loss, lower dev_loss, lower dev_cer, slightly better dev_wer, and non-empty sample hypotheses, which makes it the strongest candidate so far for continued Iu Mien fine-tuning on this machine.
