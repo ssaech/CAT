@@ -1,0 +1,56 @@
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements.txt
+
+download the wav files, update paths in data_kaldi.sh
+then
+    cd /Users/web/CAT/egs/IuMien
+
+    /Users/web/CAT/.venv/bin/python local/split_data.py \
+    --data_path /Users/web/MightLJSpeech/MightLJSpeech-1.1/metadata.csv \
+    --data_output_path /Users/web/MightLJSpeech/MightLJSpeech-1.1
+
+    /Users/web/CAT/.venv/bin/python local/fliter_data.py
+
+    /Users/web/CAT/.venv/bin/python local/extract_fbank.py \
+    /Users/web/MightLJSpeech/MightLJSpeech-1.1
+
+    /Users/web/CAT/.venv/bin/python utils/data/resolvedata.py
+
+
+python utils/pipeline/asr.py exp/Mono-subword --start_stage 1 --stop_stage 4 
+
+
+- The Iu Mien recipe is now in much better working shape locally: we repaired the data path, tokenizer path, and preprocessing flow, but full CAT ASR training still cannot run on this machine because CAT hard-requires CUDA and rejects CPU-only training in [coreutils.py](/Users/web/CAT/cat/shared/coreutils.py:497).
+
+- Kaldi is not required for the local CPU workflow we set up. We avoided the repo’s Kaldi-dependent training route and instead used local preprocessing plus a separate CPU-friendly Hugging Face `Wav2Vec2 CTC` baseline.
+
+- The source MightLJSpeech corpus only provided `metadata.csv`, not `train_data.txt`, `dev_data.txt`, or `test_data.txt`, so we generated those split files with the patched [split_data.py](/Users/web/CAT/egs/IuMien/local/split_data.py).
+
+- We updated [fliter_data.py](/Users/web/CAT/egs/IuMien/local/fliter_data.py) so duplicate filtering works against the real local corpus path and safely ignores blank or malformed lines.
+
+- We updated [extract_fbank.py](/Users/web/CAT/egs/IuMien/local/extract_fbank.py) so feature extraction handles the generated split files more robustly and does not fail on empty or malformed entries.
+
+- We patched [data_prep.py](/Users/web/CAT/cat/utils/data/data_prep.py) so CAT can fall back to standard WAV loading without `torchcodec`, and we forced single-worker extraction to avoid the macOS `torch_shm_manager` shared-memory failure.
+
+- We fixed the `Mono-subword` tokenizer output path in [hyper-p.json](/Users/web/CAT/egs/IuMien/exp/Mono-subword/hyper-p.json), which is why CAT stage 1 and stage 2 were finally able to run, even though full CAT training still cannot continue on CPU.
+
+- Whisper on CPU was tested as a possible local transcription fallback, but it was not usable zero-shot for this dataset: it hallucinated Chinese output for an Iu Mien clip, so it is not a reliable path here.
+
+- To keep moving without CUDA, we built a separate CPU-friendly supervised baseline in [train_wav2vec2_ctc_cpu.py](/Users/web/CAT/egs/IuMien/local/train_wav2vec2_ctc_cpu.py). That script reads the generated split files, builds a character vocabulary from Iu Mien transcripts, resamples audio to 16 kHz, trains on CPU, and saves checkpoints plus metrics.
+
+- The tiny Wav2Vec2 smoke test succeeded, which confirmed that a local CPU training path is viable on this machine.
+
+- The first `facebook/wav2vec2-base-960h` fine-tuning runs failed with `NaN` losses. We stabilized that path by lowering the learning rate, setting `grad-accum=1`, disabling spec augment by default, and adding an immediate failure check for non-finite loss in [train_wav2vec2_ctc_cpu.py](/Users/web/CAT/egs/IuMien/local/train_wav2vec2_ctc_cpu.py).
+
+- The model load warnings were investigated and are expected rather than fatal:
+  `wav2vec2.masked_spec_embed | MISSING` means a training-time parameter was initialized fresh,
+  and `lm_head.weight` / `lm_head.bias | MISMATCH` means the CTC output layer was rebuilt for the Iu Mien label set instead of reusing the pretrained English output head.
+
+- After stabilization, training became numerically healthy and losses decreased across runs and epochs, but `CER` and `WER` remained at `1.0`, so we added sample prediction logging to evaluation.
+
+- That evaluation patch revealed the actual current failure mode: `dev_empty_pred_frac: 1.0`. The model is collapsing to CTC blank predictions, so all decoded hypotheses are empty even though the loss is improving.
+
+- The current recommended next step is an unfrozen low-learning-rate run so the encoder has a better chance to escape blank-only decoding:
+  `python local/train_wav2vec2_ctc_cpu.py --data-root /Users/web/MightLJSpeech/MightLJSpeech-1.1 --model facebook/wav2vec2-base-960h --save-dir exp_cpu/iumien_wav2vec2_unfrozen_200x5 --epochs 5 --max-train 200 --max-dev 50 --batch-size 1 --grad-accum 1 --lr 5e-6 --show-samples 5`
+  and do not add `--freeze-feature-encoder`.

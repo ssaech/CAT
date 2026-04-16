@@ -16,7 +16,7 @@
             "model_prefix": "sentencepiece/bpe500/spm"
         },
         "|V|": 500,
-        "file": "exp/conformer-ctc-bpe-2/tokenizer.tknz"
+        "file": "exp/Mono-subword/tokenizer.tknz"
     },
     "train": {
         "bin": "cat.ctc.train",

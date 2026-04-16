@@ -7,6 +7,7 @@
 
 import os
 import sys
+import wave
 from typing import *
 from typing import Any
 from tqdm import tqdm
@@ -75,6 +76,53 @@ class Processor:
                 toexpand = sum([x._next for x in toexpand], [])
 
 
+def _load_audio(file: str, normalize: bool = True, **kwrds):
+    """Load audio with torchaudio, falling back to the stdlib wave module.
+
+    The torchaudio build in this environment expects torchcodec, which is not
+    installed. The IuMien corpus uses standard PCM WAV files, so wave is enough.
+    """
+
+    try:
+        return torchaudio.load(file, **kwrds)
+    except Exception as exc:
+        if not isinstance(exc, (ImportError, ModuleNotFoundError, RuntimeError)):
+            raise
+
+    import numpy as np
+
+    with wave.open(file, "rb") as wf:
+        sample_rate = wf.getframerate()
+        num_channels = wf.getnchannels()
+        sampwidth = wf.getsampwidth()
+        raw = wf.readframes(wf.getnframes())
+
+    if sampwidth == 1:
+        audio = np.frombuffer(raw, dtype=np.uint8).astype(np.float32)
+        audio = (audio - 128.0) / 128.0
+    elif sampwidth == 2:
+        audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32)
+    elif sampwidth == 4:
+        audio = np.frombuffer(raw, dtype=np.int32).astype(np.float32)
+    else:
+        raise RuntimeError(
+            f"unsupported WAV sample width: {sampwidth} bytes in file {file}"
+        )
+
+    if num_channels > 1:
+        audio = audio.reshape(-1, num_channels).T
+    else:
+        audio = audio.reshape(1, -1)
+
+    tensor = torch.from_numpy(audio.copy())
+    if normalize and sampwidth != 1:
+        if sampwidth == 2:
+            tensor = tensor / float(torch.iinfo(torch.int16).max)
+        elif sampwidth == 4:
+            tensor = tensor / float(torch.iinfo(torch.int32).max)
+    return tensor, sample_rate
+
+
 class ReadProcessor(Processor):
     """Processor wrapper to read from audio file."""
 
@@ -83,7 +131,7 @@ class ReadProcessor(Processor):
         self._kwrds = kwrds
 
     def _process_fn(self, file: str, *args, **kwargs) -> torch.Tensor:
-        return torchaudio.load(file, *args, **kwargs, **self._kwrds)[0]
+        return _load_audio(file, *args, **kwargs, **self._kwrds)[0]
 
 
 class NormalizeProcessor(Processor):
@@ -222,9 +270,10 @@ def _process_as_kaldi(
     dataloader = DataLoader(
         AudioData(processor=processor, audio_list=raw_audios),
         # if you have a high speed disk, try increase num_worker to fasten
-        # the dataloding
+        # the dataloading. macOS sandboxed environments can fail with torch
+        # shared-memory setup, so keep this single-worker by default.
         shuffle=False,
-        num_workers=16,
+        num_workers=0,
         batch_size=None,
     )
     f_ark = os.path.abspath(f_ark)
@@ -285,7 +334,7 @@ def prepare_kaldi_feat(
 
     load_with_norm = not read_raw_data
     if sample_frequency is None:
-        sample_frequency = torchaudio.load(audios[subsets[0]][0][1])[1]
+        sample_frequency = _load_audio(audios[subsets[0]][0][1], normalize=False)[1]
 
     fbank_processor = FBankProcessor(sample_frequency, num_mel_bins)
     if apply_cmvn:

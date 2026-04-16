@@ -1,53 +1,73 @@
 #!/bin/bash
+set -euo pipefail
 
-# 设置相关路径和文件名
-audio_dir="/home/dlk/code/asr/cat_base_asr_copy/MightLJSPeech/MightLJSpeech-1.1/wavs"
-text_file="/home/dlk/code/asr/cat_base_asr_copy/MightLJSPeech/MightLJSpeech-1.1"
+# Default to the local corpus location on this machine, but allow overrides.
+audio_dir="${MIGHTLJSPEECH_WAV_DIR:-/Users/web/MightLJSpeech/MightLJSpeech-1.1/wavs}"
+text_root="${MIGHTLJSPEECH_TEXT_ROOT:-/Users/web/MightLJSpeech/MightLJSpeech-1.1}"
 output_dir="./data/src"
 datasets=("train" "dev" "test")
 
+if [ ! -d "$audio_dir" ]; then
+    echo "Error: audio directory not found: $audio_dir"
+    echo "Set MIGHTLJSPEECH_WAV_DIR to the folder that contains the .wav files."
+    exit 1
+fi
 
+if [ -z "${KALDI_ROOT:-}" ]; then
+    echo "Error: KALDI_ROOT is not specified."
+    echo "Example: export KALDI_ROOT=/path/to/kaldi"
+    exit 1
+fi
 
-for dataset_name in "${datasets[@]}";do
-    # 创建输出目录
-    mkdir -p $output_dir/$dataset_name
+if [ ! -d "$KALDI_ROOT" ] || [ ! -d "$KALDI_ROOT/egs/wsj/s5" ]; then
+    echo "Error: KALDI_ROOT does not look like a valid Kaldi checkout: $KALDI_ROOT"
+    exit 1
+fi
 
-    # 生成 wav.scp 文件
+for dataset_name in "${datasets[@]}"; do
+    split_file="$text_root/${dataset_name}_data.txt"
+    if [ ! -f "$split_file" ]; then
+        echo "Error: split file not found: $split_file"
+        echo "Expected train_data.txt, dev_data.txt, and test_data.txt under $text_root"
+        exit 1
+    fi
+
+    mkdir -p "$output_dir/$dataset_name"
+    : > "$output_dir/$dataset_name/wav.scp"
+    : > "$output_dir/$dataset_name/text"
+
     while IFS=$'\t' read -r filename text; do
-        # 获取完整的音频文件路径
         audio_path="$audio_dir/$filename.wav"
-        # 检查音频文件是否存在
         if [ ! -f "$audio_path" ]; then
-            echo "Error: $audio_path does not exist."
+            echo "Warning: missing audio file: $audio_path"
             continue
         fi
-        # 将文件名和音频路径写入 wav.scp
         echo -e "$filename\t$audio_path" >> "$output_dir/$dataset_name/wav.scp"
-
-        # 将音频文件名和对应的文本写入 text 文件，两列用\t分隔
         echo -e "$filename\t$text" >> "$output_dir/$dataset_name/text"
-    done < "$text_file/${dataset_name}_data.txt"
+    done < "$split_file"
 
-    # 生成 text 文件
-    #cut -f 2 "$text_file/${dataset_name}_data.txt" > "$output_dir/$dataset_name/text"
+    if [ ! -s "$output_dir/$dataset_name/text" ]; then
+        echo "Error: no examples were written for $dataset_name"
+        exit 1
+    fi
 
-    echo "wav.scp and text files generated successfully in $output_dir."
+    echo "wav.scp and text files generated successfully in $output_dir/$dataset_name."
 done
 
 data_dir=./data/src
 
-for ti in dev train test;do
-  awk '{print $1,$1}' $data_dir/${ti}/text > $data_dir/${ti}/utt2spk
-  cp $data_dir/${ti}/utt2spk $data_dir/${ti}/spk2utt
+for ti in dev train test; do
+    awk '{print $1,$1}' "$data_dir/${ti}/text" > "$data_dir/${ti}/utt2spk"
+    cp "$data_dir/${ti}/utt2spk" "$data_dir/${ti}/spk2utt"
 
-  mv $data_dir/$ti/wav.scp $data_dir/$ti/wav_mp3.scp
-  awk '{print $1 "\tffmpeg -i " $2 " -f wav -ar 16000 -ab 16 -ac 1 - |"}' $data_dir/$ti/wav_mp3.scp > $data_dir/$ti/wav.scp
-
+    mv "$data_dir/$ti/wav.scp" "$data_dir/$ti/wav_mp3.scp"
+    awk '{print $1 "\tffmpeg -i " $2 " -f wav -ar 16000 -ab 16 -ac 1 - |"}' \
+        "$data_dir/$ti/wav_mp3.scp" > "$data_dir/$ti/wav.scp"
 done
 
 bash utils/data/data_prep_kaldi.sh \
     data/src/{train,dev,test} \
     --feat-dir=data/fbank \
     --nj=16 \
-    --not-apply-cmvn \
+    --not-apply-cmvn
     

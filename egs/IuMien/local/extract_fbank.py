@@ -37,15 +37,33 @@ if __name__ == "__main__":
     test_sets = {}
     with open(args.src_data+'/dev_data.txt','r') as fi:
         for line in fi:
-            audio_id,audio_trans = line.strip().split('\t')
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split('\t', maxsplit=1)
+            if len(parts) < 2:
+                continue
+            audio_id, audio_trans = parts
             dev_sets[audio_id] = audio_trans
     with open(args.src_data+'/test_data.txt','r') as fi:
         for line in fi:
-            audio_id,audio_trans = line.strip().split('\t')
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split('\t', maxsplit=1)
+            if len(parts) < 2:
+                continue
+            audio_id, audio_trans = parts
             test_sets[audio_id] = audio_trans
     with open(args.src_data+'/train_data.txt','r') as fi:
         for line in fi:
-            audio_id,audio_trans = line.strip().split('\t')
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split('\t', maxsplit=1)
+            if len(parts) < 2:
+                continue
+            audio_id, audio_trans = parts
             train_sets[audio_id] = audio_trans
     _audios = glob.glob(f"{args.src_data}/wavs/*.wav")
     audios['train'] = []
