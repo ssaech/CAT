@@ -225,8 +225,8 @@ def run_eval(
             labels = batch["labels"].detach().cpu().clone()
             labels[labels == -100] = processor.tokenizer.pad_token_id
 
-            pred_texts.extend(processor.batch_decode(pred_ids))
-            ref_texts.extend(processor.batch_decode(labels, group_tokens=False))
+            pred_texts.extend(processor.batch_decode(pred_ids, skip_special_tokens=True))
+            ref_texts.extend(processor.batch_decode(labels, group_tokens=False, skip_special_tokens=True))
 
     norm_preds = [x.lower().strip() for x in pred_texts]
     norm_refs = [x.lower().strip() for x in ref_texts]
@@ -295,9 +295,10 @@ def main() -> None:
     if load_from is not None:
         processor_dir = resolve_processor_dir(load_from)
         processor = Wav2Vec2Processor.from_pretrained(str(processor_dir))
-        vocab = processor.tokenizer.get_vocab()
+        vocab_size = processor.tokenizer.vocab_size
     else:
         vocab = build_vocab(train_items)
+        vocab_size = len(vocab)
         vocab_path = save_dir / "vocab.json"
         write_vocab(vocab, vocab_path)
 
@@ -317,6 +318,8 @@ def main() -> None:
         )
         processor = Wav2Vec2Processor(feature_extractor=feature_extractor, tokenizer=tokenizer)
         processor.save_pretrained(str(save_dir / "processor"))
+    if load_from is not None and not args.eval_only:
+        processor.save_pretrained(str(save_dir / "processor"))
 
     train_ds = AudioTextDataset(train_items, wav_dir, processor)
     dev_ds = AudioTextDataset(dev_items, wav_dir, processor)
@@ -325,14 +328,17 @@ def main() -> None:
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, collate_fn=collator)
     dev_loader = DataLoader(dev_ds, batch_size=args.batch_size, shuffle=False, collate_fn=collator)
 
-    model = Wav2Vec2ForCTC.from_pretrained(
-        str(load_from) if load_from is not None else args.model,
-        vocab_size=len(vocab),
-        pad_token_id=processor.tokenizer.pad_token_id,
-        ctc_loss_reduction="mean",
-        ctc_zero_infinity=True,
-        ignore_mismatched_sizes=True,
-    )
+    if load_from is not None:
+        model = Wav2Vec2ForCTC.from_pretrained(str(load_from))
+    else:
+        model = Wav2Vec2ForCTC.from_pretrained(
+            args.model,
+            vocab_size=vocab_size,
+            pad_token_id=processor.tokenizer.pad_token_id,
+            ctc_loss_reduction="mean",
+            ctc_zero_infinity=True,
+            ignore_mismatched_sizes=True,
+        )
     if args.freeze_feature_encoder:
         model.freeze_feature_encoder()
     if not args.enable_spec_augment:
