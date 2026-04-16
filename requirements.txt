@@ -1,25 +1,27 @@
-# gather >= 0.2.3
--e git+https://github.com/maxwellzh/torch-gather.git#egg=gather
-# warp-rnnt >= 0.9.0
--e git+https://github.com/maxwellzh/warp-rnnt.git#egg=warp-rnnt
-# webdataset, do not use 'pip install webdataset', that's outdated
--e git+https://github.com/webdataset/webdataset.git@d7334016f44a03c4a385971aa835c4f460d3f30a#egg=webdataset
-# warp-ctct >= 0.3.0
--e git+https://github.com/maxwellzh/warp-ctct.git#egg=warp-ctct
-# ctc-align >= 0.0.1
--e git+https://github.com/maxwellzh/ctc-align-cuda.git#egg=ctc-align
+# Core Python dependencies for CAT.
+#
+# This file is intentionally kept CPU / macOS friendly so `pip install -r
+# requirements.txt` succeeds even when CUDA-only extensions are unavailable.
+#
+# If you want the full RNNT / CTC-CRF feature set on a Linux + NVIDIA GPU
+# machine, install the optional CUDA extras from `requirements-cuda.txt`.
 
-# module dependencies
 torch>=1.9.0
+torchaudio
+
+-e git+https://github.com/webdataset/webdataset.git@d7334016f44a03c4a385971aa835c4f460d3f30a#egg=webdataset
+
 tqdm>=4.62.3
 matplotlib>=3.4.3
 sentencepiece>=0.1.96
 kaldiio>=2.17.2
+
 # dependency issue, see https://github.com/protocolbuffers/protobuf/issues/10051
 protobuf==3.20.2
+
 tensorboard>=2.6.0
 jiwer>=2.2.0
 pyyaml>=6.0
 transformers>=4.12.3
 jieba>=0.42.1
-levenshtein
+python-Levenshtein>=0.21.0

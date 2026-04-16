@@ -5,6 +5,8 @@
 """Top interface of CTC training.
 """
 
+from __future__ import annotations
+
 __all__ = ["AMTrainer", "build_model", "_parser", "main"]
 
 from ..shared import Manager
@@ -16,13 +18,25 @@ import os
 import argparse
 import Levenshtein
 from typing import *
-from ctcdecode import CTCBeamDecoder
 from tqdm import tqdm
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
 from torch.cuda.amp import autocast
+
+try:
+    import ctcdecode
+except ModuleNotFoundError:
+    ctcdecode = None
+
+
+def _require_ctcdecode():
+    if ctcdecode is None:
+        raise ModuleNotFoundError(
+            "No module named 'ctcdecode'. Install ctcdecode only if you need beam-search decoding."
+        )
+    return ctcdecode
 
 # NOTE (huahuan):
 #   1/4 subsampling is used for Conformer model defaultly
@@ -105,7 +119,7 @@ class AMTrainer(nn.Module):
         use_crf: bool = False,
         den_lm: Optional[str] = None,
         lamb: Optional[float] = 0.01,
-        decoder: CTCBeamDecoder = None,
+        decoder: "CTCBeamDecoder" = None,
     ):
         super().__init__()
 
@@ -251,7 +265,7 @@ def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> f
     return scatter_list[0]
 
 
-def build_beamdecoder(cfg: dict) -> CTCBeamDecoder:
+def build_beamdecoder(cfg: dict) -> "CTCBeamDecoder":
     """
     beam_size:
     num_classes:
@@ -270,7 +284,7 @@ def build_beamdecoder(cfg: dict) -> CTCBeamDecoder:
     else:
         labels = [""] * cfg["num_classes"]
 
-    return CTCBeamDecoder(
+    return _require_ctcdecode().CTCBeamDecoder(
         labels=labels,
         model_path=cfg.get("kenlm", None),
         beam_width=cfg.get("beam_size", 16),

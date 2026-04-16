@@ -17,9 +17,16 @@ from ..shared.data import KaldiSpeechDataset, sortedPadCollateASR
 
 import os
 import math
-import gather
 import argparse
-import warp_rnnt
+try:
+    import gather
+except ModuleNotFoundError:
+    gather = None
+
+try:
+    import warp_rnnt
+except ModuleNotFoundError:
+    warp_rnnt = None
 
 try:
     import warp_ctct
@@ -34,6 +41,22 @@ from typing import *
 import torch
 import torch.nn as nn
 import torch.distributed as dist
+
+
+def _require_gather():
+    if gather is None:
+        raise ModuleNotFoundError(
+            "No module named 'gather'. Install gather only if you need RNNT training."
+        )
+    return gather
+
+
+def _require_warp_rnnt():
+    if warp_rnnt is None:
+        raise ModuleNotFoundError(
+            "No module named 'warp_rnnt'. Install warp-rnnt only if you need RNNT training."
+        )
+    return warp_rnnt
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, **mkwargs):
@@ -179,7 +202,7 @@ class TransducerTrainer(nn.Module):
             # squeeze targets to 1-dim
             y = y.to(enc_out.device, non_blocking=True)
             if y.dim() == 2:
-                y = gather.cat(y, ly)
+                y = _require_gather().cat(y, ly)
 
         xys = self.joiner(enc_out, pred_out, lsub, ly + 1)
 
@@ -205,7 +228,7 @@ class TransducerTrainer(nn.Module):
 
         if isinstance(self.joiner, joiner_zoo.LogAdd):
             if self.topo == "rnnt":
-                fn = warp_rnnt.rnnt_loss_simple
+                fn = _require_warp_rnnt().rnnt_loss_simple
             elif self.topo == "ctct":
                 fn = warp_ctct.ctct_simple_loss
             else:
@@ -214,7 +237,7 @@ class TransducerTrainer(nn.Module):
 
         xys, y, lsub, ly = self.compute_join(enc_out, pred_out, y, lsub, ly)
         if self.topo == "rnnt":
-            loss = warp_rnnt.rnnt_loss(xys, y, lsub, ly, compact=self._compact)
+            loss = _require_warp_rnnt().rnnt_loss(xys, y, lsub, ly, compact=self._compact)
         elif self.topo == "ctct":
             loss = warp_ctct.ctct_loss(xys, y, lsub, ly)
         else:

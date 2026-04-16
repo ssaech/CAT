@@ -9,11 +9,23 @@
 __all__ = ["AbsJointNet", "JointNet"]
 
 
-import gather
 from typing import *
 
 import torch
 import torch.nn as nn
+
+try:
+    import gather
+except ModuleNotFoundError:
+    gather = None
+
+
+def _require_gather():
+    if gather is None:
+        raise ModuleNotFoundError(
+            "No module named 'gather'. Install gather only if you need RNNT helpers."
+        )
+    return gather
 
 
 class AbsJointNet(nn.Module):
@@ -105,8 +117,9 @@ class JointNet(AbsJointNet):
             and enc_out_lens is not None
             and pred_out_lens is not None
         ):
-            enc_out = gather.cat(enc_out, enc_out_lens)
-            pred_out = gather.cat(pred_out, pred_out_lens)
+            g = _require_gather()
+            enc_out = g.cat(enc_out, enc_out_lens)
+            pred_out = g.cat(pred_out, pred_out_lens)
             d_enc = 2
 
         if self._mode == "add":
@@ -117,7 +130,7 @@ class JointNet(AbsJointNet):
                 expanded_out = enc_out + pred_out
             elif d_enc == 2:
                 # compact layout
-                expanded_out = gather.sum(
+                expanded_out = _require_gather().sum(
                     enc_out, pred_out, enc_out_lens, pred_out_lens
                 )
             else:  # d_enc == 3
@@ -131,7 +144,7 @@ class JointNet(AbsJointNet):
                 v_enc, v_pred = enc_out.size(-1), pred_out.size(-1)
                 enc_out = torch.nn.functional.pad(enc_out, (0, v_pred))
                 pred_out = torch.nn.functional.pad(pred_out, (v_enc, 0))
-                expanded_out = gather.sum(
+                expanded_out = _require_gather().sum(
                     enc_out, pred_out, enc_out_lens, pred_out_lens
                 )
             else:  # d_enc == 3

@@ -14,7 +14,6 @@ from ..shared.decoder import AbsDecoder
 from ..shared.manager import Manager, evaluate as default_eval
 from ..shared.data import CorpusDataset, sortedPadCollateLM
 
-import gather
 import math
 import argparse
 from typing import *
@@ -22,6 +21,19 @@ from typing import *
 import torch
 import torch.nn as nn
 import torch.distributed as dist
+
+try:
+    import gather
+except ModuleNotFoundError:
+    gather = None
+
+
+def _require_gather():
+    if gather is None:
+        raise ModuleNotFoundError(
+            "No module named 'gather'. Install gather only if you need LM training."
+        )
+    return gather
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
@@ -67,7 +79,7 @@ class LMTrainer(nn.Module):
 
         # squeeze preds by concat all sentences
         # logits: (\sum{S_i}, C)
-        logits = gather.cat(preds, input_lengths)
+        logits = _require_gather().cat(preds, input_lengths)
 
         # targets: (\sum{S_i})
         loss = self.criterion(logits, targets)

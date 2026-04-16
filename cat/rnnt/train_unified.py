@@ -17,16 +17,39 @@ from ..shared.simu_net import SimuNet
 from ..shared.data import sortedPadCollateASR
 from ..shared.manager import Manager, train as default_train_func
 
-import gather
 import math
 import random
 import argparse
 import numpy as np
 from typing import *
-from warp_rnnt import rnnt_loss
+try:
+    import gather
+except ModuleNotFoundError:
+    gather = None
+
+try:
+    from warp_rnnt import rnnt_loss
+except ModuleNotFoundError:
+    rnnt_loss = None
 
 import torch
 import torch.nn as nn
+
+
+def _require_gather():
+    if gather is None:
+        raise ModuleNotFoundError(
+            "No module named 'gather'. Install gather only if you need RNNT training."
+        )
+    return gather
+
+
+def _require_rnnt_loss():
+    if rnnt_loss is None:
+        raise ModuleNotFoundError(
+            "No module named 'warp_rnnt'. Install warp-rnnt only if you need RNNT training."
+        )
+    return rnnt_loss
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
@@ -93,7 +116,7 @@ class UnifiedTTrainer(TransducerTrainer):
             # squeeze targets to 1-dim
             y = y.to(enc_out.device, non_blocking=True)
             if y.dim() == 2:
-                y = gather.cat(y, ly)
+                y = _require_gather().cat(y, ly)
 
         joinout = self.joiner(enc_out, pred_out, lsub, ly + 1)
 
@@ -289,14 +312,14 @@ class UnifiedTTrainer(TransducerTrainer):
         else:
             loss_simu = 0.0
 
-        loss_utt = rnnt_loss(
+            loss_utt = _require_rnnt_loss()(
             joinout,
             y,
             lsub,
             ly,
             compact=self._compact,
         )
-        loss_streaming = rnnt_loss(
+            loss_streaming = _require_rnnt_loss()(
             chunk_joinout,
             y,
             lsub,

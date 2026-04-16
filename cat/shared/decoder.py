@@ -1,11 +1,13 @@
-# Copyright 2022 Tsinghua University
-# Apache 2.0.
-# Author: Huahuan Zheng (maxwellzh@outlook.com)
 """Decoder module impl
 """
 
+from __future__ import annotations
+
+# Copyright 2022 Tsinghua University
+# Apache 2.0.
+# Author: Huahuan Zheng (maxwellzh@outlook.com)
+
 from . import layer as clayer
-import kenlm
 import transformers
 from typing import *
 
@@ -14,6 +16,19 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from transformers import GPT2Model, GPT2Config
+
+try:
+    import kenlm
+except ModuleNotFoundError:
+    kenlm = None
+
+
+def _require_kenlm():
+    if kenlm is None:
+        raise ModuleNotFoundError(
+            "No module named 'kenlm'. Install KenLM only if you need n-gram decoding."
+        )
+    return kenlm
 
 
 class AbsDecoder(nn.Module):
@@ -535,7 +550,7 @@ class NGram(AbsDecoder):
         self.bos_id = bos_id
         self.eos_id = eos_id
         self.unk_id = unk_id
-        self.ngram = kenlm.Model(f_binlm)
+        self.ngram = _require_kenlm().Model(f_binlm)
         # scale: convert log10 -> loge
         self.scale = torch.tensor(10.0).log_().item()
 
@@ -821,7 +836,8 @@ class SyllableEnhancedLSTM(LSTM):
 
 
 def init_state(model: kenlm.Model, pre_toks: List[str]):
-    state, state2 = kenlm.State(), kenlm.State()
+    kenlm_mod = _require_kenlm()
+    state, state2 = kenlm_mod.State(), kenlm_mod.State()
     for tok in pre_toks:
         model.BaseScore(state, tok, state2)
         state, state2 = state2, state
@@ -829,6 +845,7 @@ def init_state(model: kenlm.Model, pre_toks: List[str]):
 
 
 def update_state(model: kenlm.Model, prev_state: kenlm.State, token: str):
-    new_state = kenlm.State()
+    kenlm_mod = _require_kenlm()
+    new_state = kenlm_mod.State()
     log_p = model.BaseScore(prev_state, token, new_state)
     return log_p, new_state

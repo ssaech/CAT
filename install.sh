@@ -40,6 +40,27 @@ function check_py_package() {
     echo "$?"
 }
 
+function should_install_cuda_extras() {
+    # Allow users to override the auto-detection when needed.
+    [ "${CAT_SKIP_CUDA:-0}" = "1" ] && return 1
+    [ "${CAT_INSTALL_CUDA:-0}" = "1" ] && return 0
+
+    case "$(uname -s)" in
+    Darwin)
+        return 1
+        ;;
+    Linux)
+        # CUDA-only extensions are not useful on CPU-only Linux installs.
+        command -v nvcc >/dev/null 2>&1 || return 1
+        ;;
+    *)
+        return 1
+        ;;
+    esac
+
+    return 0
+}
+
 function exc_install() {
     name=$1
     [ -z $name ] && {
@@ -47,8 +68,7 @@ function exc_install() {
         return 1
     }
 
-    case $name in
-    ctcdecode | cat | all)
+    if [[ "$name" == "ctcdecode" || "$name" == "all" ]]; then
         # install ctcdecode is annoying...
         [[ $force == "False" && $(check_py_package ctcdecode) -eq 0 ]] || {
             if [ ! -d src/ctcdecode ]; then
@@ -63,8 +83,9 @@ function exc_install() {
             # ... so we cannot put it in requirements.txt
             python -m pip install src/ctcdecode || return 1
         }
-        ;;&
-    kenlm | cat | all)
+    fi
+
+    if [[ "$name" == "kenlm" || "$name" == "all" ]]; then
         # install kenlm
         # kenlm is a denpendency of cat, so we first check the python package installation
         [[ $force == "False" && $(check_py_package kenlm) -eq 0 && -x src/bin/lmplz && -x src/bin/build_binary ]] || {
@@ -84,8 +105,9 @@ function exc_install() {
             mkdir -p bin && cd bin
             ln -snf ../kenlm/build/bin/* ./ && cd ../../
         }
-        ;;&
-    ctc-crf | cat | all)
+    fi
+
+    if [[ "$name" == "ctc-crf" || "$name" == "all" ]]; then
         # install ctc-crf loss function
         [[ $force == "False" && $(check_py_package ctc_crf) -eq 0 ]] || {
             if [ $(command -v gcc-7) ]; then
@@ -104,17 +126,25 @@ function exc_install() {
             cd test && python main.py || return 1
             cd ../../../
         }
-        ;;&
-    cat | all)
+    fi
+
+    if [[ "$name" == "cat" || "$name" == "all" ]]; then
         # change dir to a different one to test whether cat module has been installed.
-        [[ $force == "False" && $(check_py_package cat) -eq 0 ]] || {
+        [[ $force == "False" && $(check_py_package cat) -eq 0 && $(check_py_package torchaudio) -eq 0 ]] || {
             python -m pip install -r requirements.txt || return 1
+            if should_install_cuda_extras; then
+                python -m pip install -r requirements-cuda.txt || return 1
+            else
+                echo "Skipping CUDA-only extras on $(uname -s)."
+                echo "Set CAT_INSTALL_CUDA=1 to force them, or CAT_SKIP_CUDA=1 to suppress this check."
+            fi
             python -m pip install -e . || return 1
             # check installation
             $(cd egs && python -c "import cat") >/dev/null || return 1
         }
-        ;;&
-    fst-decoder | all)
+    fi
+
+    if [[ "$name" == "fst-decoder" || "$name" == "all" ]]; then
         # install the fst decoder
         # test kaldi installation
         [[ $force == "False" && -x src/bin/latgen-faster ]] || {
@@ -135,8 +165,9 @@ function exc_install() {
             cd src/bin/ && ln -snf ../fst-decoder/latgen-faster ./
             cd - >/dev/null
         }
-        ;;&
-    g2p-tool | all)
+    fi
+
+    if [[ "$name" == "g2p-tool" || "$name" == "all" ]]; then
         # install the Phonetisaurus G2P tool
         export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:\$LD_LIBRARY_PATH
         [[ $force == "False" && $(check_py_package phonetisaurus) -eq 0 ]] || {
@@ -144,9 +175,7 @@ function exc_install() {
             ./build.sh
             cd - >/dev/null
         }
-        ;;
-    *) ;;
-    esac
+    fi
 
     echo "installed module:$name"
     return 0
@@ -156,17 +185,18 @@ function exc_rm() {
     name=$1
     [ -z $name ] && return 0
 
-    case $name in
-    cat | all)
+    if [[ "$name" == "cat" || "$name" == "all" ]]; then
         # FIXME: maybe we should clean building dependencies?
         python -m pip uninstall -y cat
         python setup.py clean --all
-        ;;&
-    ctcdecode | all)
+    fi
+
+    if [[ "$name" == "ctcdecode" || "$name" == "all" ]]; then
         python -m pip uninstall -y ctcdecode
         rm -rf src/ctcdecode
-        ;;&
-    kenlm | all)
+    fi
+
+    if [[ "$name" == "kenlm" || "$name" == "all" ]]; then
         python -m pip uninstall -y kenlm
 
         [ -d src ] && {
@@ -179,24 +209,25 @@ function exc_rm() {
             [ -d kenlm ] && rm -rf kenlm/
             cd - >/dev/null
         }
-        ;;&
-    ctc-crf | all)
+    fi
+
+    if [[ "$name" == "ctc-crf" || "$name" == "all" ]]; then
         python -m pip uninstall -y ctc_crf
 
         cd src/ctc_crf
         make clean
         cd - >/dev/null
-        ;;&
-    fst-decoder | all)
+    fi
+
+    if [[ "$name" == "fst-decoder" || "$name" == "all" ]]; then
         rm -if src/bin/latgen-faster
         rm -rf src/fst-decoder/latgen-faster
-        ;;&
-    g2p-tool | all)
+    fi
+
+    if [[ "$name" == "g2p-tool" || "$name" == "all" ]]; then
         python -m pip uninstall -y phonetisaurus
         rm -if ls src/bin/phonetisaurus-*
-        ;;
-    *) ;;
-    esac
+    fi
 
     echo "removed module:$name"
     return 0
